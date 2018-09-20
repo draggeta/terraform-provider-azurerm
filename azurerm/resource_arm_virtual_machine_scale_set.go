@@ -1828,14 +1828,12 @@ func expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d *schema.ResourceD
 		})
 	}
 
-	config := &compute.LinuxConfiguration{
+	return &compute.LinuxConfiguration{
 		DisablePasswordAuthentication: &disablePasswordAuth,
 		SSH: &compute.SSHConfiguration{
 			PublicKeys: &sshPublicKeys,
 		},
 	}
-
-	return config
 }
 
 func expandAzureRmVirtualMachineScaleSetOsProfileWindowsConfig(d *schema.ResourceData) (*compute.WindowsConfiguration, error) {
