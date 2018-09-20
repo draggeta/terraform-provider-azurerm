@@ -665,7 +665,7 @@ func resourceArmVirtualMachineScaleSet() *schema.Resource {
 			if _, hasPassword := diff.GetOk("os_profile.0.admin_password"); !hasPassword {
 				disablePassword := false
 
-				if v, hasDisable := diff.GetOk("os_profile_linux_config.0.disable_password_authentication"); !hasDisable {
+				if v, hasDisable := diff.GetOk("os_profile_linux_config.0.disable_password_authentication"); hasDisable {
 					disablePassword = v.(bool)
 				}
 
@@ -857,11 +857,9 @@ func resourceArmVirtualMachineScaleSetRead(d *schema.ResourceData, meta interfac
 			}
 
 			if osProfile := profile.OsProfile; osProfile != nil {
-				if linuxConfiguration := osProfile.LinuxConfiguration; linuxConfiguration != nil {
-					flattenedLinuxConfiguration := flattenAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(linuxConfiguration)
-					if err := d.Set("os_profile_linux_config", flattenedLinuxConfiguration); err != nil {
-						return fmt.Errorf("[DEBUG] Error setting `os_profile_linux_config`: %#v", err)
-					}
+				flattenedLinuxConfiguration := flattenAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(osProfile.LinuxConfiguration)
+				if err := d.Set("os_profile_linux_config", flattenedLinuxConfiguration); err != nil {
+					return fmt.Errorf("[DEBUG] Error setting `os_profile_linux_config`: %#v", err)
 				}
 
 				if secrets := osProfile.Secrets; secrets != nil {
@@ -991,22 +989,25 @@ func flattenAzureRmVirtualMachineScaleSetIdentity(identity *compute.VirtualMachi
 
 func flattenAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(config *compute.LinuxConfiguration) []interface{} {
 	result := make(map[string]interface{})
-	result["disable_password_authentication"] = *config.DisablePasswordAuthentication
 
-	if config.SSH != nil && len(*config.SSH.PublicKeys) > 0 {
-		ssh_keys := make([]map[string]interface{}, 0, len(*config.SSH.PublicKeys))
-		for _, i := range *config.SSH.PublicKeys {
-			key := make(map[string]interface{})
-			key["path"] = *i.Path
+	if config != nil {
+		result["disable_password_authentication"] = *config.DisablePasswordAuthentication
 
-			if i.KeyData != nil {
-				key["key_data"] = *i.KeyData
+		if config.SSH != nil && len(*config.SSH.PublicKeys) > 0 {
+			ssh_keys := make([]map[string]interface{}, 0, len(*config.SSH.PublicKeys))
+			for _, i := range *config.SSH.PublicKeys {
+				key := make(map[string]interface{})
+				key["path"] = *i.Path
+
+				if i.KeyData != nil {
+					key["key_data"] = *i.KeyData
+				}
+
+				ssh_keys = append(ssh_keys, key)
 			}
 
-			ssh_keys = append(ssh_keys, key)
+			result["ssh_keys"] = ssh_keys
 		}
-
-		result["ssh_keys"] = ssh_keys
 	}
 
 	return []interface{}{result}
@@ -1615,9 +1616,7 @@ func expandAzureRMVirtualMachineScaleSetsOsProfile(d *schema.ResourceData) (*com
 		}
 	}
 
-	if _, ok := d.GetOk("os_profile_linux_config"); ok {
-		osProfile.LinuxConfiguration = expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d)
-	}
+	osProfile.LinuxConfiguration = expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d)
 
 	if _, ok := d.GetOk("os_profile_windows_config"); ok {
 		winConfig, err := expandAzureRmVirtualMachineScaleSetOsProfileWindowsConfig(d)
@@ -1808,6 +1807,10 @@ func expandAzureRmVirtualMachineScaleSetStorageProfileImageReference(d *schema.R
 
 func expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d *schema.ResourceData) *compute.LinuxConfiguration {
 	osProfilesLinuxConfig := d.Get("os_profile_linux_config").([]interface{})
+
+	if len(osProfilesLinuxConfig) == 0 || osProfilesLinuxConfig[0] == nil {
+		return nil
+	}
 
 	linuxConfig := osProfilesLinuxConfig[0].(map[string]interface{})
 	disablePasswordAuth := linuxConfig["disable_password_authentication"].(bool)
