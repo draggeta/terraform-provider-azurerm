@@ -22,6 +22,7 @@ func resourceArmVirtualMachineScaleSet() *schema.Resource {
 		Read:   resourceArmVirtualMachineScaleSetRead,
 		Update: resourceArmVirtualMachineScaleSetCreate,
 		Delete: resourceArmVirtualMachineScaleSetDelete,
+
 		Importer: &schema.ResourceImporter{
 			State: schema.ImportStatePassthrough,
 		},
@@ -163,7 +164,7 @@ func resourceArmVirtualMachineScaleSet() *schema.Resource {
 
 						"admin_password": {
 							Type:         schema.TypeString,
-							Required:     true,
+							Optional:     true,
 							Sensitive:    true,
 							ValidateFunc: validation.NoZeroValues,
 						},
@@ -270,7 +271,7 @@ func resourceArmVirtualMachineScaleSet() *schema.Resource {
 			},
 
 			"os_profile_linux_config": {
-				Type:     schema.TypeSet,
+				Type:     schema.TypeList,
 				Optional: true,
 				Computed: true,
 				MaxItems: 1,
@@ -300,7 +301,6 @@ func resourceArmVirtualMachineScaleSet() *schema.Resource {
 						},
 					},
 				},
-				Set: resourceArmVirtualMachineScaleSetOsProfileLinuxConfigHash,
 			},
 
 			"network_profile": {
@@ -657,6 +657,24 @@ func resourceArmVirtualMachineScaleSet() *schema.Resource {
 			},
 
 			"tags": tagsSchema(),
+		},
+
+		CustomizeDiff: func(diff *schema.ResourceDiff, v interface{}) error {
+
+			//os_profile.0.admin_password is required unless os_profile_linux_config.0.disable_password_authentication is true
+			if _, hasPassword := diff.GetOk("os_profile.0.admin_password"); !hasPassword {
+				disablePassword := false
+
+				if v, hasDisable := diff.GetOk("os_profile_linux_config.0.disable_password_authentication"); !hasDisable {
+					disablePassword = v.(bool)
+				}
+
+				if !disablePassword {
+					return fmt.Errorf(" `os_profile.0.admin_password` must be set unless `os_profile_linux_config.0.disable_password_authentication` is true")
+				}
+			}
+
+			return nil
 		},
 	}
 }
@@ -1367,16 +1385,6 @@ func resourceArmVirtualMachineScaleSetNetworkConfigurationHash(v interface{}) in
 	return hashcode.String(buf.String())
 }
 
-func resourceArmVirtualMachineScaleSetOsProfileLinuxConfigHash(v interface{}) int {
-	var buf bytes.Buffer
-
-	if m, ok := v.(map[string]interface{}); ok {
-		buf.WriteString(fmt.Sprintf("%t-", m["disable_password_authentication"].(bool)))
-	}
-
-	return hashcode.String(buf.String())
-}
-
 func resourceArmVirtualMachineScaleSetOsProfileWindowsConfigHash(v interface{}) int {
 	var buf bytes.Buffer
 
@@ -1608,11 +1616,7 @@ func expandAzureRMVirtualMachineScaleSetsOsProfile(d *schema.ResourceData) (*com
 	}
 
 	if _, ok := d.GetOk("os_profile_linux_config"); ok {
-		linuxConfig, err := expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d)
-		if err != nil {
-			return nil, err
-		}
-		osProfile.LinuxConfiguration = linuxConfig
+		osProfile.LinuxConfiguration = expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d)
 	}
 
 	if _, ok := d.GetOk("os_profile_windows_config"); ok {
@@ -1802,8 +1806,8 @@ func expandAzureRmVirtualMachineScaleSetStorageProfileImageReference(d *schema.R
 	return &imageReference, nil
 }
 
-func expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d *schema.ResourceData) (*compute.LinuxConfiguration, error) {
-	osProfilesLinuxConfig := d.Get("os_profile_linux_config").(*schema.Set).List()
+func expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d *schema.ResourceData) *compute.LinuxConfiguration {
+	osProfilesLinuxConfig := d.Get("os_profile_linux_config").([]interface{})
 
 	linuxConfig := osProfilesLinuxConfig[0].(map[string]interface{})
 	disablePasswordAuth := linuxConfig["disable_password_authentication"].(bool)
@@ -1818,12 +1822,10 @@ func expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d *schema.ResourceD
 		path := sshKey["path"].(string)
 		keyData := sshKey["key_data"].(string)
 
-		sshPublicKey := compute.SSHPublicKey{
+		sshPublicKeys = append(sshPublicKeys, compute.SSHPublicKey{
 			Path:    &path,
 			KeyData: &keyData,
-		}
-
-		sshPublicKeys = append(sshPublicKeys, sshPublicKey)
+		})
 	}
 
 	config := &compute.LinuxConfiguration{
@@ -1833,7 +1835,7 @@ func expandAzureRmVirtualMachineScaleSetOsProfileLinuxConfig(d *schema.ResourceD
 		},
 	}
 
-	return config, nil
+	return config
 }
 
 func expandAzureRmVirtualMachineScaleSetOsProfileWindowsConfig(d *schema.ResourceData) (*compute.WindowsConfiguration, error) {
